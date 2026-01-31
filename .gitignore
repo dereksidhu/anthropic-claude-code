@@ -25,3 +25,7 @@ Thumbs.db
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Generated config files
+vite.config.js
+vite.config.d.ts
