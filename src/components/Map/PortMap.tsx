@@ -16,9 +16,9 @@ const statusColors: Record<PortStatus, string> = {
   partial: '#f97316',
 };
 
-function createPortIcon(status: PortStatus, isSelected: boolean): L.DivIcon {
-  const size = isSelected ? 24 : 16;
-  const borderWidth = isSelected ? 3 : 2;
+function createPortIcon(status: PortStatus, isSelected: boolean, rank: number): L.DivIcon {
+  const size = isSelected ? 32 : 20;
+  const fontSize = isSelected ? 10 : 8;
 
   return L.divIcon({
     className: 'custom-port-marker',
@@ -27,11 +27,18 @@ function createPortIcon(status: PortStatus, isSelected: boolean): L.DivIcon {
         width: ${size}px;
         height: ${size}px;
         background-color: ${statusColors[status]};
-        border: ${borderWidth}px solid white;
+        border: 2px solid white;
         border-radius: 50%;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        ${isSelected ? 'animation: pulse 1.5s infinite;' : ''}
-      "></div>
+        box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: ${fontSize}px;
+        font-weight: bold;
+        cursor: pointer;
+        ${isSelected ? 'animation: pulse 1.5s infinite; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.5);' : ''}
+      ">${rank <= 10 ? rank : ''}</div>
     `,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
@@ -50,12 +57,12 @@ export function PortMap({ ports, selectedPort, onPortSelect }: PortMapProps) {
       center: [20, 0],
       zoom: 2,
       minZoom: 2,
-      maxZoom: 10,
+      maxZoom: 12,
       worldCopyJump: true,
     });
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(map);
 
     mapInstanceRef.current = map;
@@ -70,6 +77,7 @@ export function PortMap({ ports, selectedPort, onPortSelect }: PortMapProps) {
     const map = mapInstanceRef.current;
     if (!map) return;
 
+    // Remove markers for ports that no longer exist
     markersRef.current.forEach((marker, id) => {
       if (!ports.find(p => p.id === id)) {
         marker.remove();
@@ -77,9 +85,10 @@ export function PortMap({ ports, selectedPort, onPortSelect }: PortMapProps) {
       }
     });
 
+    // Update or create markers
     ports.forEach(port => {
       const isSelected = selectedPort?.id === port.id;
-      const icon = createPortIcon(port.status, isSelected);
+      const icon = createPortIcon(port.status, isSelected, port.globalRank);
 
       let marker = markersRef.current.get(port.id);
 
@@ -89,47 +98,46 @@ export function PortMap({ ports, selectedPort, onPortSelect }: PortMapProps) {
       } else {
         marker = L.marker([port.coordinates.lat, port.coordinates.lng], { icon })
           .addTo(map)
-          .on('click', () => onPortSelect(port));
+          .on('click', (e) => {
+            L.DomEvent.stopPropagation(e);
+            onPortSelect(port);
+          });
 
         markersRef.current.set(port.id, marker);
       }
 
-      marker.bindPopup(`
-        <div style="min-width: 200px;">
-          <h3 style="font-weight: bold; margin-bottom: 4px;">${port.name}</h3>
-          <p style="color: #666; font-size: 12px; margin-bottom: 8px;">${port.country}</p>
-          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            <span style="
-              background: ${statusColors[port.status]};
-              color: white;
-              padding: 2px 8px;
-              border-radius: 12px;
-              font-size: 12px;
-            ">${port.status.charAt(0).toUpperCase() + port.status.slice(1)}</span>
-          </div>
-          <div style="font-size: 12px;">
-            <p><strong>Wait Time:</strong> ${port.waitTime}h</p>
-            <p><strong>Vessels:</strong> ${port.vesselCount}/${port.capacity}</p>
-            <p><strong>Congestion:</strong> ${port.congestionLevel}</p>
-          </div>
-          ${port.alerts.length > 0 ? `
-            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee;">
-              <p style="color: #ef4444; font-size: 12px;">
-                ${port.alerts.length} active alert(s)
-              </p>
-            </div>
-          ` : ''}
+      // Add tooltip on hover (not popup on click)
+      marker.unbindTooltip();
+      marker.bindTooltip(`
+        <div style="text-align: center;">
+          <strong>#${port.globalRank} ${port.name}</strong><br/>
+          <span style="font-size: 11px; color: #666;">${port.country}</span><br/>
+          <span style="
+            display: inline-block;
+            margin-top: 4px;
+            background: ${statusColors[port.status]};
+            color: white;
+            padding: 1px 6px;
+            border-radius: 8px;
+            font-size: 10px;
+          ">${port.status}</span>
+          <span style="font-size: 11px; margin-left: 4px;">Wait: ${port.waitTime}h</span>
         </div>
-      `);
+      `, {
+        direction: 'top',
+        offset: [0, -10],
+        className: 'port-tooltip',
+      });
     });
   }, [ports, selectedPort, onPortSelect]);
 
+  // Fly to selected port
   useEffect(() => {
     if (selectedPort && mapInstanceRef.current) {
       mapInstanceRef.current.flyTo(
         [selectedPort.coordinates.lat, selectedPort.coordinates.lng],
         6,
-        { duration: 1 }
+        { duration: 0.8 }
       );
     }
   }, [selectedPort]);
@@ -137,13 +145,48 @@ export function PortMap({ ports, selectedPort, onPortSelect }: PortMapProps) {
   return (
     <div className="relative w-full h-full">
       <div ref={mapRef} className="w-full h-full" />
+
+      {/* Legend */}
+      <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg p-3 z-[1000] text-xs">
+        <p className="font-semibold mb-2">Port Status</p>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full bg-green-500"></span>
+            <span>Open</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full bg-yellow-500"></span>
+            <span>Congested</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full bg-orange-500"></span>
+            <span>Partial</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full bg-red-500"></span>
+            <span>Closed</span>
+          </div>
+        </div>
+        <p className="mt-2 text-gray-500">Tap port for details</p>
+      </div>
+
       <style>{`
         @keyframes pulse {
           0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.2); }
+          50% { transform: scale(1.15); }
         }
-        .leaflet-popup-content-wrapper {
+        .port-tooltip {
+          background: white;
+          border: none;
           border-radius: 8px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+          padding: 8px 12px;
+        }
+        .port-tooltip::before {
+          border-top-color: white;
+        }
+        .leaflet-container {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
       `}</style>
     </div>
